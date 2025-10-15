@@ -2,6 +2,15 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
 import { MigrationStatus } from './migration.constants';
 
+@Schema({ versionKey: false, _id: false })
+export class MigrationSchedule {
+  @Prop() at?: Date; // one-off time (optional)
+  @Prop() cron?: string; // cron expression (optional)
+  @Prop() timezone?: string; // IANA tz for cron (optional)
+}
+export const MigrationScheduleSchema =
+  SchemaFactory.createForClass(MigrationSchedule);
+
 @Schema({ timestamps: true, versionKey: false })
 export class MigrationClass {
   /** Unique key: <ServiceName>.<methodName> */
@@ -41,6 +50,9 @@ export class MigrationClass {
 
   @Prop()
   error?: string;
+
+  @Prop({ type: MigrationScheduleSchema })
+  schedule: MigrationSchedule;
 }
 
 export type MigrationDocument = HydratedDocument<MigrationClass>;

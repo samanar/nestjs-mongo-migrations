@@ -3,6 +3,8 @@ import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { DiscoveryService, Reflector } from '@nestjs/core';
 import type { Connection, Model } from 'mongoose';
 import { MigrationClass, MigrationDocument } from './migration.schema';
+import { SchedulerRegistry } from '@nestjs/schedule';
+import { CronJob } from 'cron';
 import {
   MIGRATIONS_CONNECTION,
   MIGRATIONS_OPTIONS,
@@ -12,6 +14,7 @@ import type {
   MigrationsModuleOptions,
   MigrationDecoratorOptions,
 } from './migration.options';
+import { removeUndefinedValuesInObject } from 'google-auth-library/build/src/util';
 
 @Injectable()
 export class MigrationsService {
@@ -24,6 +27,7 @@ export class MigrationsService {
     @InjectConnection(MIGRATIONS_CONNECTION) private readonly conn: Connection,
     @InjectModel(MigrationClass.name, MIGRATIONS_CONNECTION)
     private readonly migrationModel: Model<MigrationDocument>,
+    private readonly scheduler: SchedulerRegistry,
     @Inject(MIGRATIONS_OPTIONS) private readonly opts: MigrationsModuleOptions,
   ) {
     this.collectionName = opts.collectionName ?? 'migrations';
@@ -58,6 +62,11 @@ export class MigrationsService {
       runOnInit: meta?.runOnInit ?? true,
       runOnce: meta?.runOnce ?? true,
       retryOnFail: meta?.retryOnFail ?? true,
+      schedule: {
+        at: meta.schedule?.at,
+        cron: meta.schedule?.cron,
+        timezone: meta.schedule?.timezone,
+      },
     };
     if (!alreadyFound) {
       await this.migrationModel.create({
@@ -121,11 +130,14 @@ export class MigrationsService {
    * Run a single migration if not yet applied. Uses "running" lock to avoid duplicates across instances.
    */
   async runOne(key: string, invoke: () => Promise<any>): Promise<void> {
-    await this.migrationModel.updateOne(
-      { key },
-      { $set: { status: 'running', error: undefined } },
-      { new: true },
-    );
+    const isAlreadyRunning = await this.migrationModel.findOne({
+      key,
+      status: { $ne: 'running' },
+    });
+    if (!isAlreadyRunning) return;
+    isAlreadyRunning.status = 'running';
+    isAlreadyRunning.error = '';
+    await isAlreadyRunning.save();
 
     this.logger.log(`Running ${key}...`);
     try {
@@ -146,6 +158,79 @@ export class MigrationsService {
       throw err;
     }
   }
+
+  private async runRecurring(
+    key: string,
+    invoke: () => Promise<any>,
+  ): Promise<void> {
+    const isAlreadyRunning = await this.migrationModel.findOne({
+      key,
+      status: { $ne: 'running' },
+    });
+    if (!isAlreadyRunning) return;
+    isAlreadyRunning.status = 'running';
+    isAlreadyRunning.error = '';
+    await isAlreadyRunning.save();
+    try {
+      this.logger.log(`Running ${key} (cron)...`);
+      await Promise.resolve(invoke());
+      await this.migrationModel.updateOne(
+        { key },
+        {
+          $set: { status: 'pending', lastRunAt: new Date(), error: undefined },
+          $inc: { runCount: 1 },
+        },
+      );
+    } catch (err: any) {
+      await this.migrationModel.updateOne(
+        { key },
+        { $set: { status: 'failed', error: String(err?.stack ?? err) } },
+      );
+      this.logger.error(`Cron run failed ${key}: ${err?.message ?? err}`);
+    }
+  }
+
+  private scheduleAt(key: string, when: Date, invoke: () => Promise<any>) {
+    const delay = when.getTime() - Date.now();
+    if (delay <= 0) {
+      void this.runOne(key, invoke); // overdue -> run now
+      return;
+    }
+    const name = `migration:timeout:${key}`;
+    const ref = setTimeout(
+      async () => {
+        try {
+          this.scheduler.deleteTimeout(name);
+        } catch {}
+        await this.runOne(key, invoke);
+      },
+      Math.min(delay, 2 ** 31 - 1),
+    ); // setTimeout cap
+    this.scheduler.addTimeout(name, ref);
+    this.logger.log(`Scheduled ${key} at ${when.toISOString()}`);
+  }
+
+  private scheduleCron(
+    key: string,
+    expr: string,
+    timezone: string | undefined,
+    invoke: () => Promise<any>,
+  ) {
+    const name = `migration:cron:${key}`;
+    const job = new CronJob(
+      expr,
+      () => this.runRecurring(key, invoke),
+      null,
+      false,
+      timezone,
+    );
+    job.start();
+    this.scheduler.addCronJob(name, job);
+    this.logger.log(
+      `Cron scheduled ${key} (${expr}${timezone ? ` ${timezone}` : ''})`,
+    );
+  }
+
   /**
    * Ensure collection, discover, register, and (optionally) run pending migrations.
    */
@@ -165,10 +250,30 @@ export class MigrationsService {
       .cursor()) {
       const foundMethod = allMethods.find((i) => i.key == mig.key);
       if (!foundMethod) continue;
-      await this.runOne(mig.key, async () => {
-        const fn = (foundMethod.instance as any)[mig.methodName];
-        return fn.call(foundMethod.instance);
-      });
+      const invoke = async () =>
+        (foundMethod.instance as any)[mig.methodName].call(
+          foundMethod.instance,
+        );
+
+      if (mig.schedule?.cron) {
+        this.scheduleCron(
+          mig.key,
+          mig.schedule.cron,
+          mig.schedule.timezone,
+          invoke,
+        );
+        await this.runRecurring(mig.key, invoke);
+        continue;
+      }
+
+      // If one-off "at" is provided: schedule a single execution
+      if (mig.schedule?.at) {
+        const at = new Date(mig.schedule.at);
+        this.scheduleAt(mig.key, at, invoke);
+        continue;
+      }
+
+      await this.runOne(mig.key, invoke);
     }
   }
 }

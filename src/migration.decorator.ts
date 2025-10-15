@@ -11,4 +11,6 @@ export const Migration = (options?: MigrationDecoratorOptions) =>
     retryOnFail: options?.retryOnFail ?? true,
     description: options?.description,
     runOnInit: options?.runOnInit,
+    schedule: options?.schedule,
+    shouldRun: options?.shouldRun,
   } as MigrationDecoratorOptions);

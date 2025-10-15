@@ -15,6 +15,12 @@ export interface MigrationDecoratorOptions {
   retryOnFail?: boolean;
   runOnInit?: boolean;
   runOnce?: boolean;
+  schedule?: {
+    at?: string | Date; // one-off ISO date (or Date) for a single run
+    cron?: string; // crontab expression (e.g. "0 3 * * *")
+    timezone?: string; // e.g., "Europe/Berlin"
+  };
+  shouldRun?: (env: NodeJS.ProcessEnv) => boolean | Promise<boolean>;
 }
 
 export interface MigrationsOptionsFactory {
