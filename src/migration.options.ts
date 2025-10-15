@@ -1,11 +1,14 @@
-import { ModuleMetadata, Type } from '@nestjs/common';
+import { ModuleMetadata, Type } from "@nestjs/common";
 
 export interface MigrationsModuleOptions {
   uri: string;
   dbName?: string;
   collectionName?: string;
   directConnection?: boolean;
-  runOnInit?: boolean;
+  /**
+   * Automatically execute migrations during onApplicationBootstrap. Disable if you want manual control.
+   */
+  autoRunOnBootstrap?: boolean;
 }
 
 export interface MigrationDecoratorOptions {
@@ -30,7 +33,7 @@ export interface MigrationsOptionsFactory {
 }
 
 export interface MigrationsModuleAsyncOptions
-  extends Pick<ModuleMetadata, 'imports'> {
+  extends Pick<ModuleMetadata, "imports"> {
   useExisting?: Type<MigrationsOptionsFactory>;
   useClass?: Type<MigrationsOptionsFactory>;
   useFactory?: (

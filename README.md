@@ -30,6 +30,7 @@ import { MigrationsModule } from 'nestjs-mongo-migrations';
       dbName: 'my-app',
       collectionName: 'migrations', // optional
       runOnInit: true,               // optional
+      autoRunOnBootstrap: true,      // optional
     }),
   ],
 })
@@ -53,7 +54,7 @@ MigrationsModule.forRootAsync({
 2. **Create a migration** – decorate a provider method with `@Migration()`.
 
 ```ts
-// users-cleanup.service.ts
+ // users-cleanup.service.ts
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -84,6 +85,24 @@ export class UsersCleanupService {
 - Discover every `@Migration` method.
 - Persist metadata in MongoDB.
 - Execute pending migrations in order (and schedule recurring ones).
+
+### Run migrations after `app.listen`
+
+By default the module runs migrations during `onApplicationBootstrap`. If you prefer to defer execution until your Nest application is fully listening, set `autoRunOnBootstrap: false` in `MigrationsModule.forRoot()` (or its async variant) and trigger the service manually after `app.listen`:
+
+```ts
+// main.ts
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
+  await app.listen(3000);
+
+  const migrations = app.get(MigrationsService, { strict: false });
+  await migrations.initAndMaybeRun();
+}
+bootstrap();
+```
+
+This pattern lets you verify the app has started successfully before kicking off migrations or scheduled jobs.
 
 ## Decorator options
 

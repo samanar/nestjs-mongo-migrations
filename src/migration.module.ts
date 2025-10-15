@@ -2,6 +2,7 @@
 import {
   DynamicModule,
   Global,
+  Inject,
   Module,
   OnApplicationBootstrap,
   Provider,
@@ -29,7 +30,10 @@ import { MigrationClass, MigrationSchema } from './migration.schema';
 @Global()
 @Module({})
 export class MigrationsModule implements OnApplicationBootstrap {
-  constructor(private readonly svc: MigrationsService) {}
+  constructor(
+    private readonly svc: MigrationsService,
+    @Inject(MIGRATIONS_OPTIONS) private readonly opts: MigrationsModuleOptions,
+  ) {}
 
   /** Synchronous setup */
   static forRoot(options: MigrationsModuleOptions): DynamicModule {
@@ -131,6 +135,9 @@ export class MigrationsModule implements OnApplicationBootstrap {
   }
 
   async onApplicationBootstrap() {
+    if (this.opts.autoRunOnBootstrap === false) {
+      return;
+    }
     await this.svc.initAndMaybeRun();
   }
 }
