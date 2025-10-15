@@ -36,8 +36,8 @@
     "@nestjs/core": ">=9.0.0",
     "@nestjs/mongoose": ">=9.0.0",
     "@nestjs/schedule": ">=2.0.0",
-    "mongoose": "^6.0.0 || ^7.0.0 || ^8.0.0",
-    "reflect-metadata": "^0.1.13"
+    "mongoose": ">=6.0.0",
+    "reflect-metadata": ">=0.1.13"
   },
   "peerDependenciesMeta": {
     "@nestjs/schedule": {
