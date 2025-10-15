@@ -1,6 +1,6 @@
-import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument } from 'mongoose';
-import { MigrationStatus } from './migration.constants';
+import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
+import { HydratedDocument } from "mongoose";
+import { MigrationStatus } from "./migration.constants";
 
 @Schema({ versionKey: false, _id: false })
 export class MigrationSchedule {
@@ -25,8 +25,8 @@ export class MigrationClass {
 
   @Prop({
     type: String,
-    default: 'pending',
-    enum: ['pending', 'running', 'applied', 'failed'],
+    default: "pending",
+    enum: ["pending", "running", "applied", "failed"],
   })
   status!: MigrationStatus;
 
@@ -52,7 +52,7 @@ export class MigrationClass {
   error?: string;
 
   @Prop({ type: MigrationScheduleSchema })
-  schedule: MigrationSchedule;
+  schedule?: MigrationSchedule;
 }
 
 export type MigrationDocument = HydratedDocument<MigrationClass>;
