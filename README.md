@@ -189,4 +189,3 @@ Each migration is persisted with its key, the containing service and method name
 - Run `npm install` to refresh the lockfile (optional but recommended).
 - Execute `npm run build`.
 - Confirm `dist/` contains the compiled files.
-- Run `npm publish --access public`.
