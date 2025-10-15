@@ -1,10 +1,8 @@
-import { Inject, Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { InjectConnection, InjectModel } from "@nestjs/mongoose";
 import { DiscoveryService, Reflector } from "@nestjs/core";
 import type { Connection, Model } from "mongoose";
 import { MigrationClass, MigrationDocument } from "./migration.schema";
-import { SchedulerRegistry } from "@nestjs/schedule";
-import { CronJob } from "cron";
 import {
   MIGRATIONS_CONNECTION,
   MIGRATIONS_OPTIONS,
@@ -14,10 +12,31 @@ import type {
   MigrationsModuleOptions,
   MigrationDecoratorOptions,
 } from "./migration.options";
+
+// Dynamic imports for optional scheduler
+let SchedulerRegistry: any;
+let CronJob: any;
+
+try {
+  const scheduleModule = require("@nestjs/schedule");
+  SchedulerRegistry = scheduleModule.SchedulerRegistry;
+} catch {
+  // @nestjs/schedule not installed
+}
+
+try {
+  const cronModule = require("cron");
+  CronJob = cronModule.CronJob;
+} catch {
+  // cron not installed
+}
+
 @Injectable()
 export class MigrationsService {
   private readonly logger = new Logger(MigrationsService.name);
   private readonly collectionName: string;
+  private readonly scheduler?: any;
+  private readonly schedulingAvailable: boolean;
 
   constructor(
     private readonly discovery: DiscoveryService,
@@ -25,10 +44,18 @@ export class MigrationsService {
     @InjectConnection(MIGRATIONS_CONNECTION) private readonly conn: Connection,
     @InjectModel(MigrationClass.name, MIGRATIONS_CONNECTION)
     private readonly migrationModel: Model<MigrationDocument>,
-    private readonly scheduler: SchedulerRegistry,
+    @Optional() @Inject("SchedulerRegistry") scheduler: any,
     @Inject(MIGRATIONS_OPTIONS) private readonly opts: MigrationsModuleOptions
   ) {
     this.collectionName = opts.collectionName ?? "migrations";
+    this.scheduler = scheduler;
+    this.schedulingAvailable = !!(SchedulerRegistry && CronJob && scheduler);
+
+    if (!this.schedulingAvailable) {
+      this.logger.warn(
+        "@nestjs/schedule not detected - scheduled migrations will be skipped"
+      );
+    }
   }
 
   async ensureCollectionExists(): Promise<void> {
@@ -189,6 +216,14 @@ export class MigrationsService {
   }
 
   private scheduleAt(key: string, when: Date, invoke: () => Promise<any>) {
+    if (!this.schedulingAvailable) {
+      this.logger.warn(
+        `Cannot schedule ${key} - @nestjs/schedule not available. Running immediately.`
+      );
+      void this.runOne(key, invoke);
+      return;
+    }
+
     const delay = when.getTime() - Date.now();
     if (delay <= 0) {
       void this.runOne(key, invoke); // overdue -> run now
@@ -211,6 +246,13 @@ export class MigrationsService {
     timezone: string | undefined,
     invoke: () => Promise<any>
   ) {
+    if (!this.schedulingAvailable) {
+      this.logger.warn(
+        `Cannot schedule cron ${key} - @nestjs/schedule not available. Skipping.`
+      );
+      return;
+    }
+
     const name = `migration:cron:${key}`;
     const job = new CronJob(
       expr,

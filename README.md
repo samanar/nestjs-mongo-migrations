@@ -1,60 +1,78 @@
 # nestjs-mongo-migrations
 
-NestJS module that discovers methods decorated with `@Migration()` and coordinates MongoDB data migrations with Mongoose – including ordering, retries, and optional scheduling.
+A NestJS module that discovers `@Migration()`-decorated methods, stores their state in MongoDB, and coordinates one-off or recurring data fixes without writing boilerplate orchestration code.
 
-## Why this library?
+## Highlights
 
-- Automatically discovers migration methods across your NestJS providers.
-- Persists migration state in MongoDB to prevent duplicate executions.
-- Supports `runOnce`, retry-on-error, and cron/one-off scheduling.
-- Integrates with `@nestjs/schedule` so you can run recurring clean-up or sync jobs.
+- Auto-discovers migration methods across your providers and keeps execution order deterministic.
+- Persists status, errors, and run metadata in MongoDB so migrations execute exactly once unless you opt into repeats.
+- Supports one-time runs, retries, and recurring schedules while gracefully degrading if scheduling packages are absent.
+- Uses Nest's `MigrationsService` to orchestrate migrations automatically on bootstrap or manually when you prefer.
+- Works alongside your primary Mongoose connection without blocking application startup.
 
+## Installation
 
-## Quick start
+- Add the library to your Nest workspace:
 
-1. **Import the module** – choose `forRoot` for static configuration or `forRootAsync` if you need DI.
+  ```bash
+  npm install nestjs-mongo-migrations
+  ```
+
+- Optional scheduling support: if you want `schedule.at` or `schedule.cron` to use Nest's scheduler, also install the scheduler packages your app already depends on:
+
+  ```bash
+  npm install @nestjs/schedule cron
+  ```
+
+  When these packages are missing the module falls back automatically—one-off schedules run immediately and cron schedules are skipped with a warning.
+
+## Configure the module
+
+Most projects can configure the module statically.
 
 ```ts
 // app.module.ts
 import { Module } from '@nestjs/common';
-import { ScheduleModule } from '@nestjs/schedule';
 import { MongooseModule } from '@nestjs/mongoose';
+import { ScheduleModule } from '@nestjs/schedule';
 import { MigrationsModule } from 'nestjs-mongo-migrations';
 
 @Module({
   imports: [
-    ScheduleModule.forRoot(),
-    MongooseModule.forRoot('mongodb://localhost:27017/my-app'),
+    MongooseModule.forRoot('mongodb://localhost:27017/app'),
+    ScheduleModule.forRoot(), // optional, only if you installed @nestjs/schedule and you want to use croned or scheduled migrations
     MigrationsModule.forRoot({
-      uri: 'mongodb://localhost:27017/my-app',
-      dbName: 'my-app',
-      collectionName: 'migrations', // optional
-      runOnInit: true,               // optional
-      autoRunOnBootstrap: true,      // optional
+      uri: 'mongodb://localhost:27017/app',
+      dbName: 'migrations',         // defaults to "migrations"
+      directConnection: false,      // forward to Mongoose when needed
+      autoRunOnBootstrap: true,     // run migrations during onApplicationBootstrap
     }),
   ],
 })
 export class AppModule {}
 ```
 
-## Async configuration example
+Need configuration at runtime? Use `forRootAsync` to pull values from other providers.
 
 ```ts
 MigrationsModule.forRootAsync({
   imports: [ConfigModule],
   inject: [ConfigService],
   useFactory: async (config: ConfigService) => ({
-    uri: config.getOrThrow('MONGO_URI'),
-    dbName: config.get('MIGRATIONS_DB', 'migrations'),
-    runOnInit: config.get('RUN_MIGRATIONS_ON_BOOT', true),
+    uri: config.getOrThrow<string>('MONGO_URI'),
+    dbName: config.get<string>('MIGRATIONS_DB', 'migrations'),
+    collectionName: config.get<string>('MIGRATIONS_COLLECTION'),
+    autoRunOnBootstrap: config.get<boolean>('RUN_MIGRATIONS', true),
   }),
 });
 ```
 
-2. **Create a migration** – decorate a provider method with `@Migration()`.
+## Create migrations
+
+Decorate provider methods with `@Migration()` to register and describe what should run.
 
 ```ts
- // users-cleanup.service.ts
+// users-cleanup.service.ts
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -70,25 +88,41 @@ export class UsersCleanupService {
     retryOnFail: true,
     runOnce: true,
   })
-  async backfillSlugs() {
+  async backfillSlugs(): Promise<void> {
     await this.users.updateMany(
       { slug: { $exists: false } },
       [{ $set: { slug: { $concat: ['user-', '$_id'] } } }],
     );
   }
+
+  @Migration({
+    key: 'users.cleanup.cron',
+    runOnce: false,
+    schedule: { cron: '0 3 * * *', timezone: 'UTC' },
+    shouldRun: (env) => env.NODE_ENV === 'production',
+  })
+  async tidyInactiveAccounts(): Promise<void> {
+    await this.users.deleteMany({ active: false, updatedAt: { $lt: new Date(Date.now() - 30 * 864e5) } });
+  }
 }
 ```
 
-3. **Start your NestJS app** – the module will:
+When the application boots the module:
 
-- Ensure the migrations collection exists.
-- Discover every `@Migration` method.
-- Persist metadata in MongoDB.
-- Execute pending migrations in order (and schedule recurring ones).
+- Ensures the migrations collection exists (defaults to `migrations`).
+- Discovers decorated methods, writes their metadata to MongoDB, and tracks status (`pending`, `running`, `applied`, `failed`).
+- Executes pending migrations in order, skipping ones whose `shouldRun` predicate returns `false`.
+- Schedules recurring or one-off executions when scheduler dependencies exist.
 
-### Run migrations after `app.listen`
+## Working with the scheduler
 
-By default the module runs migrations during `onApplicationBootstrap`. If you prefer to defer execution until your Nest application is fully listening, set `autoRunOnBootstrap: false` in `MigrationsModule.forRoot()` (or its async variant) and trigger the service manually after `app.listen`:
+- The module dynamically imports `@nestjs/schedule` and `cron`. If they are available, it uses a `SchedulerRegistry` to register timeouts and cron jobs.
+- Without those packages, nothing crashes: one-off `schedule.at` migrations are executed immediately and cron-based migrations are registered as skipped with a warning in the Nest logger.
+- To enable recurring runs, install the optional packages and import `ScheduleModule.forRoot()` once in your app (as in the earlier example).
+
+## Manual execution flow
+
+Automatic execution happens during `onApplicationBootstrap` when `autoRunOnBootstrap` is `true` (the default). For full control set it to `false` and trigger migrations after your app is ready.
 
 ```ts
 // main.ts
@@ -102,34 +136,46 @@ async function bootstrap() {
 bootstrap();
 ```
 
-This pattern lets you verify the app has started successfully before kicking off migrations or scheduled jobs.
+`initAndMaybeRun()` performs collection initialization, discovery, registration, and execution in one call.
+
+## Module options
+
+| Option | Default | Notes |
+| ------ | ------- | ----- |
+| `uri` | — | Connection string used for the dedicated migrations connection. |
+| `dbName` | `"migrations"` | Database name for the connection. |
+| `collectionName` | `"migrations"` | Mongo collection that stores migration documents. |
+| `directConnection` | `false` | Passed through to the underlying Mongoose connection. |
+| `autoRunOnBootstrap` | `true` | Toggle automatic execution during Nest bootstrap. |
 
 ## Decorator options
 
-| Option | Default | Description |
-| ------ | ------- | ----------- |
-| `key` | `<Service>.<method>` | Override the stored identifier. |
-| `order` | `0` | Lower numbers run first. |
-| `runOnce` | `true` | If `false`, the migration may run multiple times (e.g. cron). |
-| `runOnInit` | `true` | Disable to register but skip automatic execution. |
-| `retryOnFail` | `true` | Attempt again when the app restarts. |
-| `description` | `undefined` | Helpful text stored alongside the migration. |
-| `schedule.at` | `undefined` | ISO date (string or `Date`) for a one-off execution in the future. |
-| `schedule.cron` | `undefined` | Cron expression processed by `cron`. |
-| `schedule.timezone` | `undefined` | IANA time zone for cron schedules. |
-| `shouldRun` | `undefined` | Async/Sync predicate leveraging `process.env`. |
+| Option | Default | Notes |
+| ------ | ------- | ----- |
+| `key` | `<Service>.<method>` | Override the unique identifier stored in MongoDB. |
+| `order` | `0` | Lower numbers run first; ties execute in discovery order. |
+| `description` | `undefined` | Helpful text stored with the migration document. |
+| `retryOnFail` | `true` | Failed migrations are marked `failed` and retried on next bootstrap. |
+| `runOnInit` | `true` | Set to `false` to register but skip automatic execution. |
+| `runOnce` | `true` | Leave `false` when you plan to run on a schedule. |
+| `schedule.at` | `undefined` | ISO 8601 string or `Date` for a single delayed run. |
+| `schedule.cron` | `undefined` | Cron expression for recurring executions (`cron` package syntax). |
+| `schedule.timezone` | `undefined` | IANA timezone name applied to the cron job. |
+| `shouldRun` | `undefined` | Optional predicate (sync or async) that can short-circuit execution based on environment variables. |
 
+## Stored documents
 
+Each migration is persisted with its key, the containing service and method name, metadata, current `status`, `lastRunAt`, and an `error` message if the previous attempt failed. This lets you audit what ran and safely coordinate multiple Nest instances sharing the same MongoDB deployment.
 
 ## Development
 
-- Build the library before publishing:
+- Build before publishing:
 
   ```bash
   npm run build
   ```
 
-- Clean the generated output:
+- Clean generated output:
 
   ```bash
   npm run clean
@@ -139,12 +185,8 @@ This pattern lets you verify the app has started successfully before kicking off
 
 ## Publishing checklist
 
-- Update the `version` in `package.json`.
+- Update the version in `package.json`.
 - Run `npm install` to refresh the lockfile (optional but recommended).
 - Execute `npm run build`.
 - Confirm `dist/` contains the compiled files.
 - Run `npm publish --access public`.
-
-## License
-
-MIT © Contributors

@@ -41,7 +41,7 @@
   },
   "peerDependenciesMeta": {
     "@nestjs/schedule": {
-      "optional": false
+      "optional": true
     }
   },
   "devDependencies": {

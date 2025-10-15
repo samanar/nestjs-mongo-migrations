@@ -6,33 +6,33 @@ import {
   Module,
   OnApplicationBootstrap,
   Provider,
-} from '@nestjs/common';
-import { DiscoveryModule, Reflector } from '@nestjs/core';
+} from "@nestjs/common";
+import { DiscoveryModule, Reflector } from "@nestjs/core";
 import {
   MongooseModule,
   getConnectionToken,
   getModelToken,
-} from '@nestjs/mongoose';
-import { Connection } from 'mongoose';
+} from "@nestjs/mongoose";
+import { Connection } from "mongoose";
 
-import { MigrationsService } from './migration.service';
+import { MigrationsService } from "./migration.service";
 import {
   MIGRATIONS_CONNECTION,
   MIGRATIONS_OPTIONS,
-} from './migration.constants';
+} from "./migration.constants";
 import {
   MigrationsModuleOptions,
   MigrationsModuleAsyncOptions,
   MigrationsOptionsFactory,
-} from './migration.options';
-import { MigrationClass, MigrationSchema } from './migration.schema';
+} from "./migration.options";
+import { MigrationClass, MigrationSchema } from "./migration.schema";
 
 @Global()
 @Module({})
 export class MigrationsModule implements OnApplicationBootstrap {
   constructor(
     private readonly svc: MigrationsService,
-    @Inject(MIGRATIONS_OPTIONS) private readonly opts: MigrationsModuleOptions,
+    @Inject(MIGRATIONS_OPTIONS) private readonly opts: MigrationsModuleOptions
   ) {}
 
   /** Synchronous setup */
@@ -53,7 +53,7 @@ export class MigrationsModule implements OnApplicationBootstrap {
   /** Shared builder used by both forRoot and forRootAsync */
   private static createDynamicModule(
     extraImports: any[],
-    optionsProviders: Provider[],
+    optionsProviders: Provider[]
   ): DynamicModule {
     // Wrap options providers in their own module so they are importable/exportable
     @Module({
@@ -70,7 +70,7 @@ export class MigrationsModule implements OnApplicationBootstrap {
       useFactory: async (opts: MigrationsModuleOptions) => {
         return {
           uri: opts.uri,
-          dbName: opts.dbName ?? 'migrations',
+          dbName: opts.dbName ?? "migrations",
           directConnection: opts.directConnection ?? false,
         };
       },
@@ -83,9 +83,22 @@ export class MigrationsModule implements OnApplicationBootstrap {
         conn.model(
           MigrationClass.name,
           MigrationSchema,
-          opts.collectionName ?? 'migrations',
+          opts.collectionName ?? "migrations"
         ),
       inject: [getConnectionToken(MIGRATIONS_CONNECTION), MIGRATIONS_OPTIONS],
+    };
+
+    // Conditionally provide SchedulerRegistry if @nestjs/schedule is available
+    const schedulerProvider: Provider = {
+      provide: "SchedulerRegistry",
+      useFactory: () => {
+        try {
+          const { SchedulerRegistry } = require("@nestjs/schedule");
+          return new SchedulerRegistry();
+        } catch {
+          return null;
+        }
+      },
     };
 
     return {
@@ -96,13 +109,18 @@ export class MigrationsModule implements OnApplicationBootstrap {
         connectionImport,
         ...extraImports,
       ],
-      providers: [Reflector, MigrationsService, modelProvider],
+      providers: [
+        Reflector,
+        MigrationsService,
+        modelProvider,
+        schedulerProvider,
+      ],
       exports: [MigrationsService],
     };
   }
 
   private static createAsyncProviders(
-    options: MigrationsModuleAsyncOptions,
+    options: MigrationsModuleAsyncOptions
   ): Provider[] {
     if (options.useFactory) {
       return [
