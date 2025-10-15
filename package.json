@@ -1,0 +1,67 @@
+{
+  "name": "nestjs-mongo-migrations",
+  "version": "1.0.0",
+  "description": "NestJS module that discovers @Migration methods and orchestrates MongoDB data migrations using Mongoose.",
+  "keywords": [
+    "nestjs",
+    "mongoose",
+    "mongodb",
+    "migrations",
+    "cron"
+  ],
+  "license": "MIT",
+  "author": "ahmadianrad.saman@gmail.com",
+  "type": "commonjs",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "rimraf dist && tsc -p tsconfig.json",
+    "clean": "rimraf dist",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "@nestjs/common": "^9.0.0 || ^10.0.0",
+    "@nestjs/core": "^9.0.0 || ^10.0.0",
+    "@nestjs/mongoose": "^9.0.0 || ^10.0.0",
+    "@nestjs/schedule": "^2.0.0 || ^3.0.0",
+    "mongoose": "^6.0.0 || ^7.0.0 || ^8.0.0",
+    "reflect-metadata": "^0.1.13"
+  },
+  "peerDependenciesMeta": {
+    "@nestjs/schedule": {
+      "optional": false
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.19",
+    "rimraf": "^5.0.5",
+    "typescript": "^5.4.5"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/samanar/nestjs-mongo-migrations.git"
+  },
+  "bugs": {
+    "url": "https://github.com/samanar/nestjs-mongo-migrations/issues"
+  },
+  "homepage": "https://github.com/samanar/nestjs-mongo-migrations#readme",
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false
+}

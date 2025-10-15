@@ -14,8 +14,6 @@ import type {
   MigrationsModuleOptions,
   MigrationDecoratorOptions,
 } from './migration.options';
-import { removeUndefinedValuesInObject } from 'google-auth-library/build/src/util';
-
 @Injectable()
 export class MigrationsService {
   private readonly logger = new Logger(MigrationsService.name);
