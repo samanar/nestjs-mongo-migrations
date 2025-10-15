@@ -1,6 +1,6 @@
 {
   "name": "nestjs-mongo-migrations",
-  "version": "1.0.0",
+  "version": "1.0.5",
   "description": "NestJS module that discovers @Migration methods and orchestrates MongoDB data migrations using Mongoose.",
   "keywords": [
     "nestjs",

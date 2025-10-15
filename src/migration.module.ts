@@ -27,6 +27,11 @@ import {
 } from "./migration.options";
 import { MigrationClass, MigrationSchema } from "./migration.schema";
 
+/**
+ * Global module that provides MongoDB migration capabilities for NestJS applications.
+ * Manages the migration system lifecycle, database connections, and service registration.
+ * Automatically discovers and executes migrations decorated with @Migration().
+ */
 @Global()
 @Module({})
 export class MigrationsModule implements OnApplicationBootstrap {
@@ -35,7 +40,13 @@ export class MigrationsModule implements OnApplicationBootstrap {
     @Inject(MIGRATIONS_OPTIONS) private readonly opts: MigrationsModuleOptions
   ) {}
 
-  /** Synchronous setup */
+  /**
+   * Synchronous module configuration for static migration options.
+   * Creates a separate MongoDB connection for storing migration metadata.
+   *
+   * @param options - Static configuration options
+   * @returns Dynamic module configuration
+   */
   static forRoot(options: MigrationsModuleOptions): DynamicModule {
     const optionsProvider: Provider = {
       provide: MIGRATIONS_OPTIONS,
@@ -44,28 +55,41 @@ export class MigrationsModule implements OnApplicationBootstrap {
     return this.createDynamicModule([], [optionsProvider]);
   }
 
-  /** Asynchronous setup */
+  /**
+   * Asynchronous module configuration for dynamic migration options.
+   * Useful when configuration depends on other services (e.g., ConfigService).
+   *
+   * @param options - Async configuration options with factory or class
+   * @returns Dynamic module configuration
+   */
   static forRootAsync(options: MigrationsModuleAsyncOptions): DynamicModule {
     const asyncProviders = this.createAsyncProviders(options);
     return this.createDynamicModule(options.imports ?? [], asyncProviders);
   }
 
-  /** Shared builder used by both forRoot and forRootAsync */
+  /**
+   * Shared builder used by both forRoot and forRootAsync methods.
+   * Creates the complete dynamic module configuration with all necessary providers.
+   *
+   * @param extraImports - Additional modules to import
+   * @param optionsProviders - Providers for the migration options
+   * @returns Complete dynamic module configuration
+   */
   private static createDynamicModule(
     extraImports: any[],
     optionsProviders: Provider[]
   ): DynamicModule {
-    // Wrap options providers in their own module so they are importable/exportable
+    // Create a module to hold and export the options providers
     @Module({
       providers: [...optionsProviders],
       exports: [...optionsProviders],
     })
     class MigrationsOptionsModule {}
 
+    // Create a separate MongoDB connection for migrations metadata
     const connectionImport = MongooseModule.forRootAsync({
       connectionName: MIGRATIONS_CONNECTION,
-      // Make MIGRATIONS_OPTIONS visible to MongooseCoreModule's factory
-      imports: [MigrationsOptionsModule],
+      imports: [MigrationsOptionsModule], // Make options available to factory
       inject: [MIGRATIONS_OPTIONS],
       useFactory: async (opts: MigrationsModuleOptions) => {
         return {
@@ -76,7 +100,7 @@ export class MigrationsModule implements OnApplicationBootstrap {
       },
     });
 
-    // Model provider so we can set collection name from options (works sync & async)
+    // Create the Migration model provider with configurable collection name
     const modelProvider: Provider = {
       provide: getModelToken(MigrationClass.name, MIGRATIONS_CONNECTION),
       useFactory: (conn: Connection, opts: MigrationsModuleOptions) =>
@@ -96,7 +120,7 @@ export class MigrationsModule implements OnApplicationBootstrap {
           const { SchedulerRegistry } = require("@nestjs/schedule");
           return new SchedulerRegistry();
         } catch {
-          return null;
+          return null; // Gracefully handle when package is not installed
         }
       },
     };
@@ -119,10 +143,18 @@ export class MigrationsModule implements OnApplicationBootstrap {
     };
   }
 
+  /**
+   * Creates providers for asynchronous module configuration.
+   * Handles both useFactory and useClass patterns for dynamic options.
+   *
+   * @param options - Async configuration options
+   * @returns Array of providers for the async configuration
+   */
   private static createAsyncProviders(
     options: MigrationsModuleAsyncOptions
   ): Provider[] {
     if (options.useFactory) {
+      // Factory-based async configuration
       return [
         {
           provide: MIGRATIONS_OPTIONS,
@@ -132,6 +164,7 @@ export class MigrationsModule implements OnApplicationBootstrap {
       ];
     }
 
+    // Class-based async configuration
     const useClass = options.useClass ?? options.useExisting!;
     const providers: Provider[] = [
       {
@@ -142,6 +175,7 @@ export class MigrationsModule implements OnApplicationBootstrap {
       },
     ];
 
+    // Add the factory class as a provider if useClass is specified
     if (options.useClass) {
       providers.push({
         provide: useClass,
@@ -152,6 +186,10 @@ export class MigrationsModule implements OnApplicationBootstrap {
     return providers;
   }
 
+  /**
+   * Lifecycle hook that runs after the application has bootstrapped.
+   * Triggers the migration discovery and execution process if auto-run is enabled.
+   */
   async onApplicationBootstrap() {
     if (this.opts.autoRunOnBootstrap === false) {
       return;
